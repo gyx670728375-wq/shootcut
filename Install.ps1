@@ -3,6 +3,18 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+$appName = 'GlobalScreenshotMenu'
+$sourceExecutable = Join-Path $PSScriptRoot "$appName.exe"
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+if (-not (Test-Path -LiteralPath $sourceExecutable)) {
+    throw "Missing $appName.exe. Keep all downloaded files in the same folder."
+}
+
+Get-Process -Name $appName -ErrorAction SilentlyContinue | Stop-Process -Force
+New-Item -Path $runKey -Force | Out-Null
+New-ItemProperty -Path $runKey -Name $appName -Value ('"{0}"' -f $sourceExecutable) -PropertyType String -Force | Out-Null
+
 $menuLocations = @(
     'HKCU:\Software\Classes\Directory\Background\shell\QuickScreenshot',
     'HKCU:\Software\Classes\DesktopBackground\Shell\QuickScreenshot'
@@ -24,7 +36,9 @@ foreach ($location in $menuLocations) {
     Set-Item -Path $commandLocation -Value $command
 }
 
+Start-Process -FilePath $sourceExecutable
+
 Write-Host ''
 Write-Host 'Installation completed.' -ForegroundColor Green
-Write-Host 'Right-click the desktop or a folder background and select the screenshot command.'
-Write-Host 'On Windows 11, it may appear under Show more options.'
+Write-Host 'Use Ctrl + right-click anywhere to open the screenshot menu.'
+Write-Host 'The helper will start automatically when you sign in to Windows.'
