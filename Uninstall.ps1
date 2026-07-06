@@ -16,5 +16,3 @@ foreach ($location in $menuLocations) {
 
 Write-Host ''
 Write-Host 'Uninstallation completed. The screenshot menu item has been removed.' -ForegroundColor Green
-Write-Host ''
-Read-Host 'Press Enter to close'

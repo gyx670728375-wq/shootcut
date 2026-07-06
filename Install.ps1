@@ -28,5 +28,3 @@ Write-Host ''
 Write-Host 'Installation completed.' -ForegroundColor Green
 Write-Host 'Right-click the desktop or a folder background and select the screenshot command.'
 Write-Host 'On Windows 11, it may appear under Show more options.'
-Write-Host ''
-Read-Host 'Press Enter to close'
