@@ -36,10 +36,13 @@ internal sealed class ScreenshotApplication : ApplicationContext
     private const int VirtualKeyControl = 0x11;
 
     private readonly LowLevelMouseProc mouseProc;
-    private readonly ContextMenuStrip screenshotMenu;
     private readonly NotifyIcon trayIcon;
+    private readonly ScreenshotPopup popup;
+    private readonly System.Windows.Forms.Timer popupTimer;
     private IntPtr mouseHook;
     private bool suppressRightClick;
+    private bool popupPending;
+    private Point popupLocation;
 
     internal ScreenshotApplication()
     {
@@ -48,9 +51,6 @@ internal sealed class ScreenshotApplication : ApplicationContext
 
         ToolStripMenuItem exitItem = new ToolStripMenuItem("\u9000\u51FA");
         exitItem.Click += delegate { ExitThread(); };
-
-        screenshotMenu = new ContextMenuStrip();
-        screenshotMenu.Items.Add(captureItem);
 
         ContextMenuStrip trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add(new ToolStripMenuItem("\u622A\u5C4F", null, delegate { StartScreenshot(); }));
@@ -75,12 +75,29 @@ internal sealed class ScreenshotApplication : ApplicationContext
         trayIcon.Visible = true;
         trayIcon.DoubleClick += delegate { StartScreenshot(); };
 
+        popup = new ScreenshotPopup(StartScreenshot);
+        popupTimer = new System.Windows.Forms.Timer();
+        popupTimer.Interval = 30;
+        popupTimer.Tick += delegate
+        {
+            if (!popupPending)
+            {
+                return;
+            }
+
+            popupPending = false;
+            WriteLog("Ctrl+right-click detected");
+            popup.ShowAt(popupLocation);
+        };
+        popupTimer.Start();
+
         mouseProc = MouseHookCallback;
         mouseHook = SetMouseHook(mouseProc);
         if (mouseHook == IntPtr.Zero)
         {
             throw new InvalidOperationException("Unable to install the global mouse hook.");
         }
+        WriteLog("Global helper started");
     }
 
     private static IntPtr SetMouseHook(LowLevelMouseProc proc)
@@ -106,7 +123,8 @@ internal sealed class ScreenshotApplication : ApplicationContext
             if (mouseMessage == WmRightButtonUp && suppressRightClick)
             {
                 suppressRightClick = false;
-                screenshotMenu.Show(Cursor.Position);
+                popupLocation = Cursor.Position;
+                popupPending = true;
                 return new IntPtr(1);
             }
         }
@@ -131,6 +149,18 @@ internal sealed class ScreenshotApplication : ApplicationContext
         }
     }
 
+    private static void WriteLog(string message)
+    {
+        try
+        {
+            string path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GlobalScreenshotMenu.log");
+            System.IO.File.AppendAllText(path, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + message + Environment.NewLine);
+        }
+        catch
+        {
+        }
+    }
+
     protected override void ExitThreadCore()
     {
         if (mouseHook != IntPtr.Zero)
@@ -141,7 +171,9 @@ internal sealed class ScreenshotApplication : ApplicationContext
 
         trayIcon.Visible = false;
         trayIcon.Dispose();
-        screenshotMenu.Dispose();
+        popupTimer.Stop();
+        popupTimer.Dispose();
+        popup.Dispose();
         base.ExitThreadCore();
     }
 
@@ -171,4 +203,63 @@ internal sealed class ScreenshotApplication : ApplicationContext
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string moduleName);
+}
+
+internal sealed class ScreenshotPopup : Form
+{
+    private readonly Button captureButton;
+    private readonly Action captureAction;
+
+    internal ScreenshotPopup(Action action)
+    {
+        captureAction = action;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        BackColor = Color.FromArgb(35, 35, 35);
+        ClientSize = new Size(116, 42);
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        TopMost = true;
+
+        captureButton = new Button();
+        captureButton.BackColor = Color.FromArgb(45, 45, 45);
+        captureButton.Dock = DockStyle.Fill;
+        captureButton.FlatAppearance.BorderColor = Color.FromArgb(90, 90, 90);
+        captureButton.FlatStyle = FlatStyle.Flat;
+        captureButton.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular);
+        captureButton.ForeColor = Color.White;
+        captureButton.Text = "\u622A\u5C4F";
+        captureButton.Click += delegate
+        {
+            Hide();
+            captureAction();
+        };
+        Controls.Add(captureButton);
+
+        Deactivate += delegate { Hide(); };
+        KeyPreview = true;
+        KeyDown += delegate(object sender, KeyEventArgs eventArgs)
+        {
+            if (eventArgs.KeyCode == Keys.Escape)
+            {
+                Hide();
+            }
+        };
+    }
+
+    internal void ShowAt(Point cursorPosition)
+    {
+        Rectangle area = Screen.FromPoint(cursorPosition).WorkingArea;
+        int x = Math.Min(cursorPosition.X, area.Right - Width);
+        int y = Math.Min(cursorPosition.Y, area.Bottom - Height);
+        Location = new Point(Math.Max(area.Left, x), Math.Max(area.Top, y));
+
+        if (!Visible)
+        {
+            Show();
+        }
+        BringToFront();
+        Activate();
+        captureButton.Focus();
+    }
 }
