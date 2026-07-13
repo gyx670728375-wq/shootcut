@@ -34,6 +34,7 @@ internal sealed class ScreenshotApplication : ApplicationContext
     private const int WmRightButtonDown = 0x0204;
     private const int WmRightButtonUp = 0x0205;
     private const int VirtualKeyControl = 0x11;
+    private const uint MonitorDefaultToNearest = 2;
 
     private readonly LowLevelMouseProc mouseProc;
     private readonly NotifyIcon trayIcon;
@@ -116,6 +117,12 @@ internal sealed class ScreenshotApplication : ApplicationContext
             int mouseMessage = message.ToInt32();
             if (mouseMessage == WmRightButtonDown && IsControlPressed())
             {
+                if (IsForegroundWindowFullScreen())
+                {
+                    suppressRightClick = false;
+                    return CallNextHookEx(mouseHook, code, message, data);
+                }
+
                 suppressRightClick = true;
                 return new IntPtr(1);
             }
@@ -135,6 +142,41 @@ internal sealed class ScreenshotApplication : ApplicationContext
     private static bool IsControlPressed()
     {
         return (GetAsyncKeyState(VirtualKeyControl) & 0x8000) != 0;
+    }
+
+    private static bool IsForegroundWindowFullScreen()
+    {
+        IntPtr foregroundWindow = GetForegroundWindow();
+        if (foregroundWindow == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        NativeRect windowRect;
+        if (!GetWindowRect(foregroundWindow, out windowRect))
+        {
+            return false;
+        }
+
+        IntPtr monitor = MonitorFromWindow(foregroundWindow, MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        NativeMonitorInfo monitorInfo = new NativeMonitorInfo();
+        monitorInfo.Size = Marshal.SizeOf(typeof(NativeMonitorInfo));
+        if (!GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            return false;
+        }
+
+        NativeRect monitorRect = monitorInfo.Monitor;
+        const int tolerance = 2;
+        return windowRect.Left <= monitorRect.Left + tolerance
+            && windowRect.Top <= monitorRect.Top + tolerance
+            && windowRect.Right >= monitorRect.Right - tolerance
+            && windowRect.Bottom >= monitorRect.Bottom - tolerance;
     }
 
     private static void StartScreenshot()
@@ -203,6 +245,36 @@ internal sealed class ScreenshotApplication : ApplicationContext
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string moduleName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr window, out NativeRect rectangle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref NativeMonitorInfo monitorInfo);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct NativeMonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect WorkArea;
+        public uint Flags;
+    }
 }
 
 internal sealed class ScreenshotPopup : Form
